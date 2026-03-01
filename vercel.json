@@ -1,9 +1,11 @@
 {
   "version": 2,
   "builds": [
-    { "src": "serverless.js", "use": "@vercel/node" }
+    {
+      "src": "serverless.js",
+      "use": "@vercel/node",
+      "config": { "maxLambdaSize": "50mb", "includeFiles": "src/**" }
+    }
   ],
-  "routes": [
-    { "src": "/.*", "dest": "/serverless.js" }
-  ]
+  "routes": [{ "src": "/(.*)", "dest": "/serverless.js" }]
 }
