@@ -57,35 +57,16 @@ const PREFETCH_ENABLED =
 const app = express();
 const staticDir = path.join(__dirname, "src");
 app.use(express.static(staticDir));
-app.use(express.json({ limit: "512kb" }));
 
 app.use((req, res, next) => {
   res.setHeader("X-App", "IPTV-Stremio-Addon");
   next();
 });
 
-// Encryption endpoint
-app.post("/encrypt", (req, res) => {
-  if (!process.env.CONFIG_SECRET) {
-    return res
-      .status(400)
-      .json({
-        error: "Encryption not enabled on server (CONFIG_SECRET missing)",
-      });
-  }
-  try {
-    const jsonStr = JSON.stringify(req.body || {});
-    const token = encryptConfig(jsonStr);
-    if (!token) return res.status(500).json({ error: "Encrypt failed" });
-    res.json({ token });
-  } catch {
-    res.status(400).json({ error: "Invalid config payload" });
-  }
-});
-
 /**
  * Prescan cache endpoint: browser uploads successfully fetched Xtream data
  * so the server can use it when the IPTV provider blocks server IPs.
+ * MUST be defined BEFORE the global express.json() body parser (512kb limit).
  */
 app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
   const { xtreamUrl, xtreamUsername, xtreamPassword, liveStreams, vodStreams, seriesStreams } = req.body || {};
@@ -106,6 +87,28 @@ app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
     series: Array.isArray(seriesStreams) ? seriesStreams.length : 0,
   });
   res.json({ ok: true });
+});
+
+// Global JSON body parser for all other routes (512kb limit)
+app.use(express.json({ limit: "512kb" }));
+
+// Encryption endpoint
+app.post("/encrypt", (req, res) => {
+  if (!process.env.CONFIG_SECRET) {
+    return res
+      .status(400)
+      .json({
+        error: "Encryption not enabled on server (CONFIG_SECRET missing)",
+      });
+  }
+  try {
+    const jsonStr = JSON.stringify(req.body || {});
+    const token = encryptConfig(jsonStr);
+    if (!token) return res.status(500).json({ error: "Encrypt failed" });
+    res.json({ token });
+  } catch {
+    res.status(400).json({ error: "Invalid config payload" });
+  }
 });
 
 /**
