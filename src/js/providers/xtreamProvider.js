@@ -351,20 +351,11 @@ async function fetchSeriesInfo(addonInstance, seriesId) {
   )
     return { videos: [] };
 
-  const base = `${config.xtreamUrl}/player_api.php?username=${encodeURIComponent(config.xtreamUsername)}&password=${encodeURIComponent(config.xtreamPassword)}`;
-  try {
-    const infoResp = await fetch(
-      `${base}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`,
-      {
-        timeout: 25000,
-        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36" },
-      },
-    );
-    if (!infoResp.ok) return { videos: [] };
-    const infoJson = await infoResp.json();
+  const providerKey = prescanCache.makeKey(config.xtreamUrl, config.xtreamUsername, config.xtreamPassword);
+
+  // Helper: transform raw Xtream episodes object into our video format
+  function transformEpisodes(episodesObj) {
     const videos = [];
-    // Xtream returns episodes keyed by season: { "1": [ { id, title, container_extension, episode_num, season, ...}, ... ], "2": [...] }
-    const episodesObj = infoJson.episodes || {};
     Object.keys(episodesObj).forEach((seasonKey) => {
       const seasonEpisodes = episodesObj[seasonKey];
       if (Array.isArray(seasonEpisodes)) {
@@ -372,26 +363,21 @@ async function fetchSeriesInfo(addonInstance, seriesId) {
           const epId = ep.id;
           const container = ep.container_extension || "mp4";
           const url = `${config.xtreamUrl}/series/${encodeURIComponent(config.xtreamUsername)}/${encodeURIComponent(config.xtreamPassword)}/${epId}.${container}`;
-          // Convert released date to ISO 8601 format
           let releasedRaw = ep.releasedate || ep.added || null;
           let releasedISO = null;
           if (releasedRaw) {
             releasedRaw = String(releasedRaw).trim();
-            // Unix timestamp (all digits)
             if (/^\d{9,13}$/.test(releasedRaw)) {
-              const ts =
-                releasedRaw.length <= 10
-                  ? parseInt(releasedRaw, 10) * 1000
-                  : parseInt(releasedRaw, 10);
+              const ts = releasedRaw.length <= 10
+                ? parseInt(releasedRaw, 10) * 1000
+                : parseInt(releasedRaw, 10);
               const d = new Date(ts);
               if (!isNaN(d.getTime())) releasedISO = d.toISOString();
             } else {
-              // Try parsing as date string
               const d = new Date(releasedRaw);
               if (!isNaN(d.getTime())) releasedISO = d.toISOString();
             }
           }
-
           videos.push({
             id: `iptv_series_ep_${epId}`,
             title: ep.title || `Episode ${ep.episode_num}`,
@@ -409,10 +395,34 @@ async function fetchSeriesInfo(addonInstance, seriesId) {
         }
       }
     });
-    // Sort by season then episode
     videos.sort((a, b) => a.season - b.season || a.episode - b.episode);
+    return videos;
+  }
+
+  // Try direct API fetch first
+  const base = `${config.xtreamUrl}/player_api.php?username=${encodeURIComponent(config.xtreamUsername)}&password=${encodeURIComponent(config.xtreamPassword)}`;
+  try {
+    const infoResp = await fetch(
+      `${base}&action=get_series_info&series_id=${encodeURIComponent(seriesId)}`,
+      {
+        timeout: 25000,
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36" },
+      },
+    );
+    if (!infoResp.ok) throw new Error(`API returned ${infoResp.status}`);
+    const infoJson = await infoResp.json();
+    const episodesObj = infoJson.episodes || {};
+    const videos = transformEpisodes(episodesObj);
     return { videos, fetchedAt: Date.now() };
   } catch {
+    // API fetch failed — try prescan cache
+    const cachedEpisodes = prescanCache.getSeriesInfo(providerKey, seriesId);
+    if (cachedEpisodes && typeof cachedEpisodes === "object") {
+      const videos = transformEpisodes(cachedEpisodes);
+      if (videos.length > 0) {
+        return { videos, fetchedAt: Date.now(), fromCache: true };
+      }
+    }
     return { videos: [] };
   }
 }

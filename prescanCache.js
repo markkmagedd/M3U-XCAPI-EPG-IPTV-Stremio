@@ -6,6 +6,9 @@ const LRUCache = require("./lruCache");
 
 const cache = new LRUCache({ max: 20, ttl: 4 * 3600 * 1000 }); // 4 hour TTL
 
+// Separate cache for series episode info (keyed by "provider_key:series_id")
+const seriesInfoCache = new LRUCache({ max: 10000, ttl: 4 * 3600 * 1000 });
+
 function makeKey(url, username, password) {
   return crypto
     .createHash("md5")
@@ -21,4 +24,10 @@ module.exports = {
     return cache.get(key);
   },
   makeKey,
+  setSeriesInfo(providerKey, seriesId, data) {
+    seriesInfoCache.set(`${providerKey}:${seriesId}`, data);
+  },
+  getSeriesInfo(providerKey, seriesId) {
+    return seriesInfoCache.get(`${providerKey}:${seriesId}`);
+  },
 };

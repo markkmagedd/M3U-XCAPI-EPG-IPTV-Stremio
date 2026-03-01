@@ -94,6 +94,26 @@ app.post("/api/prescan-cache", express.json({ limit: "50mb" }), (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Series info cache endpoint: browser batch-uploads episode data for series
+ * so the server can serve episodes when the IPTV provider blocks server IPs.
+ * Accepts { xtreamUrl, xtreamUsername, xtreamPassword, batch: { "seriesId": episodesObj, ... } }
+ */
+app.post("/api/series-info-cache", express.json({ limit: "50mb" }), (req, res) => {
+  const { xtreamUrl, xtreamUsername, xtreamPassword, batch } = req.body || {};
+  if (!xtreamUrl || !xtreamUsername || !xtreamPassword || !batch) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+  const providerKey = prescanCache.makeKey(xtreamUrl, xtreamUsername, xtreamPassword);
+  let count = 0;
+  for (const [seriesId, episodesObj] of Object.entries(batch)) {
+    prescanCache.setSeriesInfo(providerKey, seriesId, episodesObj);
+    count++;
+  }
+  dlog("Series info cache stored", { providerKey, seriesCount: count });
+  res.json({ ok: true, stored: count });
+});
+
 // Global JSON body parser for all other routes (512kb limit)
 app.use(express.json({ limit: "512kb" }));
 

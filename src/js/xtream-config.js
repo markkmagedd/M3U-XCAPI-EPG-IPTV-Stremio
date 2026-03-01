@@ -380,6 +380,71 @@
         appendDetail("⚠ Prescan cache upload error: " + cacheErr.message + " (non-critical)");
       }
 
+      // Batch-fetch series episode info from browser and upload to server
+      // This is needed because the IPTV provider blocks the server IP
+      if (Array.isArray(seriesList) && seriesList.length > 0) {
+        setProgress(42, "Fetching series episodes");
+        appendDetail(`→ Batch-fetching episode info for ${seriesList.length.toLocaleString()} series...`);
+        const BATCH_SIZE = 10; // concurrent requests per batch
+        const UPLOAD_CHUNK = 100; // upload every N series
+        let fetchedCount = 0;
+        let failedCount = 0;
+        let currentBatch = {};
+
+        async function uploadSeriesInfoBatch(batch) {
+          try {
+            await fetch("/api/series-info-cache", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                xtreamUrl: baseUrl,
+                xtreamUsername: username,
+                xtreamPassword: password,
+                batch,
+              }),
+            });
+          } catch { /* non-critical */ }
+        }
+
+        for (let i = 0; i < seriesList.length; i += BATCH_SIZE) {
+          const chunk = seriesList.slice(i, i + BATCH_SIZE);
+          const results = await Promise.allSettled(
+            chunk.map(async (s) => {
+              const sid = s.series_id;
+              if (!sid) return null;
+              try {
+                const url = `${base}&action=get_series_info&series_id=${encodeURIComponent(sid)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                const json = await resp.json();
+                return { sid, episodes: json.episodes || {} };
+              } catch {
+                return null;
+              }
+            })
+          );
+          for (const r of results) {
+            if (r.status === "fulfilled" && r.value && r.value.episodes) {
+              currentBatch[r.value.sid] = r.value.episodes;
+              fetchedCount++;
+            } else {
+              failedCount++;
+            }
+          }
+          // Upload in chunks to avoid massive payloads
+          if (Object.keys(currentBatch).length >= UPLOAD_CHUNK || i + BATCH_SIZE >= seriesList.length) {
+            if (Object.keys(currentBatch).length > 0) {
+              await uploadSeriesInfoBatch(currentBatch);
+              currentBatch = {};
+            }
+          }
+          // Update progress (42% to 58% range)
+          const pct = 42 + Math.round(((i + chunk.length) / seriesList.length) * 16);
+          setProgress(pct, `Episodes: ${fetchedCount}/${seriesList.length}`);
+        }
+        appendDetail(`✔ Series episodes: ${fetchedCount.toLocaleString()} fetched, ${failedCount.toLocaleString()} failed`);
+      }
+
       // EPG (non-fatal)
       if (enableEpgInitial) {
         const epgSourceUrl =
